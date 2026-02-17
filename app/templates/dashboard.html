@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pellet Price Tracker</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .header img {
+            height: 56px;
+            width: auto;
+        }
+        h1 {
+            font-size: 1.5rem;
+            color: #1a1a1a;
+        }
+        .town-btn {
+            margin-left: auto;
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            background: #fff;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        .town-btn:hover { background: #f0f0f0; }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: #fff;
+            border-radius: 12px;
+            max-width: 480px;
+            width: 90%;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px 12px;
+            border-bottom: 1px solid #eee;
+        }
+        .modal-header h2 {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.4rem;
+            cursor: pointer;
+            color: #999;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .modal-close:hover { background: #f0f0f0; color: #333; }
+        .modal-search {
+            padding: 16px 24px 0;
+            position: relative;
+        }
+        .modal-body {
+            padding: 16px 24px 24px;
+            overflow-y: auto;
+        }
+        .town-search {
+            position: relative;
+        }
+        .town-search input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            outline: none;
+        }
+        .town-search input:focus { border-color: #1976d2; }
+        .autocomplete-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 100;
+            display: none;
+        }
+        .autocomplete-dropdown.open { display: block; }
+        .autocomplete-item {
+            padding: 10px 12px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            border-bottom: 1px solid #f5f5f5;
+        }
+        .autocomplete-item:last-child { border-bottom: none; }
+        .autocomplete-item:hover { background: #f0f7ff; }
+        .town-list { list-style: none; }
+        .town-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .town-item:last-child { border-bottom: none; }
+        .town-item-name {
+            flex: 1;
+            font-size: 0.875rem;
+            cursor: pointer;
+            padding: 4px 0;
+        }
+        .town-item-name:hover { color: #1976d2; }
+        .town-item-name.current { font-weight: 600; color: #1976d2; }
+        .town-badge {
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .town-badge.active { background: #e8f5e9; color: #2e7d32; }
+        .town-badge.inactive { background: #fce4ec; color: #c62828; }
+        .town-action {
+            background: none;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+        }
+        .town-action:hover { background: #f0f0f0; }
+        .town-action.delete { color: #c62828; border-color: #ef9a9a; }
+        .town-action.delete:hover { background: #fce4ec; }
+        .filters {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            background: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .filter-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        .filters a, .filters button {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #fff;
+            color: #333;
+            text-decoration: none;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .filters a:hover, .filters button:hover { background: #f0f0f0; }
+        .filters a.active, .filters button.active {
+            background: #1976d2;
+            color: #fff;
+            border-color: #1976d2;
+        }
+        .filter-form {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-left: auto;
+        }
+        .filter-form label {
+            font-size: 0.875rem;
+            color: #666;
+        }
+        .filters input[type="date"] {
+            padding: 7px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            max-width: 150px;
+        }
+        .chart-container {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            min-width: 650px;
+        }
+        th {
+            background: #fafafa;
+            font-weight: 600;
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #666;
+            border-bottom: 2px solid #eee;
+            white-space: nowrap;
+        }
+        th[data-sort] { cursor: pointer; }
+        th[data-sort]:hover { color: #1976d2; }
+        th[data-sort].sorted { color: #1976d2; }
+        .sort-arrow { font-size: 0.65rem; }
+        td {
+            padding: 10px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.875rem;
+            white-space: nowrap;
+        }
+        tr:hover td { background: #f8f9fa; }
+        @media (max-width: 600px) {
+            body { padding: 12px; }
+            .filters { flex-direction: column; align-items: stretch; }
+            .filter-buttons { justify-content: center; }
+            .filter-form { margin-left: 0; justify-content: center; }
+            .chart-container { padding: 12px; }
+            th, td { padding: 8px 10px; }
+        }
+        .flash-badge {
+            display: inline-block;
+            background: #ff5722;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .alert-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin: 1px 2px;
+        }
+        .alert-badge.lowest { background: #e8f5e9; color: #2e7d32; }
+        .alert-badge.drop { background: #fff3e0; color: #e65100; }
+        .alert-badge.discount { background: #e3f2fd; color: #1565c0; }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 20px;
+        }
+        .pagination a {
+            padding: 8px 14px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            text-decoration: none;
+            color: #333;
+            font-size: 0.875rem;
+        }
+        .pagination a.active {
+            background: #1976d2;
+            color: #fff;
+            border-color: #1976d2;
+        }
+        .pagination a:hover { background: #f0f0f0; }
+        .pagination a.active:hover { background: #1565c0; }
+
+        .empty-state {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 60px 20px;
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        .empty-state .empty-icon {
+            font-size: 4rem;
+            margin-bottom: 16px;
+        }
+        .empty-state h2 {
+            font-size: 1.3rem;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+        .empty-state p {
+            font-size: 0.95rem;
+            color: #666;
+            margin-bottom: 24px;
+        }
+        .empty-state button {
+            padding: 10px 24px;
+            background: #1976d2;
+            color: #fff;
+            border: 1px solid #1976d2;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .empty-state button:hover { background: #1565c0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
+        <h1>Pellet Price Tracker</h1>
+        <button id="townBtn" class="town-btn" onclick="openTownModal()">
+            {{ selected_town_name }} &#9662;
+        </button>
+    </div>
+
+    {% if all_towns %}
+    <div class="filters">
+        <div class="filter-buttons">
+            <a href="?period=month{{ '&town=' ~ selected_town if selected_town else '' }}"
+               class="{{ 'active' if period == 'month' else '' }}">
+                Dernier mois
+            </a>
+            <a href="?period=year{{ '&town=' ~ selected_town if selected_town else '' }}"
+               class="{{ 'active' if period == 'year' else '' }}">
+                Derni&egrave;re ann&eacute;e
+            </a>
+        </div>
+        <form method="get" class="filter-form">
+            {% if selected_town %}<input type="hidden" name="town" value="{{ selected_town }}">{% endif %}
+            <label>Du</label>
+            <input type="date" name="from" value="{{ date_from }}">
+            <label>au</label>
+            <input type="date" name="to" value="{{ date_to }}">
+            <button type="submit">Filtrer</button>
+        </form>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="priceChart"></canvas>
+    </div>
+
+    {% set base_qs = "period=" ~ period ~ "&from=" ~ date_from ~ "&to=" ~ date_to ~ ("&town=" ~ selected_town if selected_town else "") %}
+    <div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="0">Date <span class="sort-arrow"></span></th>
+                <th data-sort="1">Prix unitaire (&euro;/t) <span class="sort-arrow"></span></th>
+                <th data-sort="2">Prix remis&eacute; (&euro;/t) <span class="sort-arrow"></span></th>
+                <th data-sort="3">Livraison (&euro;) <span class="sort-arrow"></span></th>
+                <th data-sort="4">Total (&euro;) <span class="sort-arrow"></span></th>
+                <th data-sort="5">Flash <span class="sort-arrow"></span></th>
+                <th>Alertes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in crawls %}
+            <tr>
+                <td>{{ c.crawl_date.strftime('%d/%m/%Y') }}</td>
+                <td>{{ "%.2f"|format(c.unit_price)|replace(".", ",") }}</td>
+                <td>{{ "%.2f"|format(c.unit_price_with_discount)|replace(".", ",") }}</td>
+                <td>{{ "%.2f"|format(c.delivery)|replace(".", ",") }}</td>
+                <td>{{ "%.2f"|format(c.unit_price_with_discount * c.quantity + c.delivery)|replace(".", ",") }}</td>
+                <td>{% if c.flash_sale %}<span class="flash-badge">FLASH</span>{% else %}&mdash;{% endif %}</td>
+                <td>
+                    {% for n in c.notifications %}
+                        {% if n.alert_type == 'lowest_price' %}<span class="alert-badge lowest">Plus bas</span>
+                        {% elif n.alert_type == 'price_drop' %}<span class="alert-badge drop">Baisse</span>
+                        {% elif n.alert_type == 'discount_active' %}<span class="alert-badge discount">Remise</span>
+                        {% endif %}
+                    {% endfor %}
+                    {% if not c.notifications %}&mdash;{% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" style="text-align:center;padding:30px;color:#999;">Aucune donn&eacute;e pour cette p&eacute;riode.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+
+    {% set page_qs = base_qs %}
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+        <a href="?{{ page_qs }}&page={{ page - 1 }}">&laquo; Pr&eacute;c.</a>
+        {% endif %}
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page %}
+            <a class="active" href="#">{{ p }}</a>
+            {% elif p <= 3 or p > total_pages - 3 or (p >= page - 2 and p <= page + 2) %}
+            <a href="?{{ page_qs }}&page={{ p }}">{{ p }}</a>
+            {% elif p == 4 or p == total_pages - 3 %}
+            <span style="padding:8px 4px;color:#999;">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+        {% if page < total_pages %}
+        <a href="?{{ page_qs }}&page={{ page + 1 }}">Suiv. &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <script>
+        const labels = {{ chart_labels | tojson }}.map(function(iso) {
+            const parts = iso.split('-');
+            return parts[2] + '/' + parts[1] + '/' + parts[0];
+        });
+        const prices = {{ chart_prices | tojson }};
+        const discounts = {{ chart_discounts | tojson }};
+
+        const hasDiscount = discounts.some((d, i) => d !== null && d !== prices[i]);
+
+        const datasets = [
+            {
+                label: 'Prix unitaire (€/t)',
+                data: prices,
+                borderColor: '#1976d2',
+                backgroundColor: 'rgba(25,118,210,0.1)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 3,
+                pointHoverRadius: 5,
+            }
+        ];
+
+        if (hasDiscount) {
+            datasets.push({
+                label: 'Prix remisé (€/t)',
+                data: discounts,
+                borderColor: '#43a047',
+                borderWidth: 2,
+                borderDash: [6, 4],
+                fill: false,
+                tension: 0.3,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+            });
+        }
+
+        new Chart(document.getElementById('priceChart'), {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                aspectRatio: window.innerWidth < 600 ? 1 : 2.5,
+                interaction: { intersect: false, mode: 'index' },
+                plugins: {
+                    legend: { position: 'top' },
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Date' },
+                        ticks: { maxTicksLimit: 15 },
+                    },
+                    y: {
+                        title: { display: true, text: '€ / tonne' },
+                        beginAtZero: false,
+                    },
+                },
+            },
+        });
+    </script>
+
+    <script>
+    // Client-side table sorting
+    (function() {
+        const table = document.querySelector('table');
+        if (!table) return;
+        const tbody = table.querySelector('tbody');
+        const headers = table.querySelectorAll('th[data-sort]');
+        let currentCol = null;
+        let currentDir = 'asc';
+
+        function parseValue(td, colIndex) {
+            const text = td.textContent.trim();
+            // Date column (index 0): dd/mm/yyyy -> yyyymmdd for comparison
+            if (colIndex === 0) {
+                const parts = text.split('/');
+                if (parts.length === 3) return parts[2] + parts[1] + parts[0];
+                return text;
+            }
+            // Flash column (index 5): FLASH = 1, dash = 0
+            if (colIndex === 5) {
+                return text === 'FLASH' ? 1 : 0;
+            }
+            // Price/number columns (1,2,3,4): "415,00" -> 415.00
+            const num = parseFloat(text.replace(/\s/g, '').replace(',', '.'));
+            return isNaN(num) ? 0 : num;
+        }
+
+        headers.forEach(function(th) {
+            th.addEventListener('click', function() {
+                const colIndex = parseInt(th.getAttribute('data-sort'));
+
+                // Toggle direction
+                if (currentCol === colIndex) {
+                    currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentCol = colIndex;
+                    currentDir = 'asc';
+                }
+
+                // Update arrow indicators
+                headers.forEach(function(h) {
+                    h.classList.remove('sorted');
+                    h.querySelector('.sort-arrow').textContent = '';
+                });
+                th.classList.add('sorted');
+                th.querySelector('.sort-arrow').textContent = currentDir === 'asc' ? ' \u25B2' : ' \u25BC';
+
+                // Sort rows
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                rows.sort(function(a, b) {
+                    const aVal = parseValue(a.cells[colIndex], colIndex);
+                    const bVal = parseValue(b.cells[colIndex], colIndex);
+                    let cmp;
+                    if (typeof aVal === 'number' && typeof bVal === 'number') {
+                        cmp = aVal - bVal;
+                    } else {
+                        cmp = String(aVal).localeCompare(String(bVal));
+                    }
+                    return currentDir === 'asc' ? cmp : -cmp;
+                });
+
+                // Re-append sorted rows
+                rows.forEach(function(row) { tbody.appendChild(row); });
+            });
+        });
+    })();
+    </script>
+
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-icon">&#127968;</div>
+        <h2>Aucune ville configur&eacute;e</h2>
+        <p>Ajoutez votre premi&egrave;re ville pour commencer le suivi des prix.</p>
+        <button onclick="openTownModal()">Ajouter une ville</button>
+    </div>
+    {% endif %}
+
+    <!-- Modal gestion des villes -->
+    <div class="modal-overlay" id="townModal" onclick="if(event.target===this)closeTownModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Gestion des villes</h2>
+                <button class="modal-close" onclick="closeTownModal()">&times;</button>
+            </div>
+            <div class="modal-search">
+                <div class="town-search">
+                    <input type="text" id="townSearchInput" placeholder="Rechercher une ville (3 lettres min)..." oninput="onTownSearch(this.value)">
+                    <div class="autocomplete-dropdown" id="townDropdown"></div>
+                </div>
+            </div>
+            <div class="modal-body">
+                <ul class="town-list">
+                    {% for t in all_towns %}
+                    <li class="town-item" data-id="{{ t.id }}">
+                        <span class="town-item-name {{ 'current' if selected_town == t.id else '' }}" onclick="selectTown({{ t.id }})">{{ t.name }}</span>
+                        <span class="town-badge {{ 'active' if t.active else 'inactive' }}">{{ 'actif' if t.active else 'inactif' }}</span>
+                        <button class="town-action" onclick="toggleTown({{ t.id }}, {{ 'true' if not t.active else 'false' }})">{{ 'Activer' if not t.active else 'D\u00e9sactiver' }}</button>
+                        <button class="town-action delete" onclick="deleteTown({{ t.id }}, '{{ t.name }}')">&times;</button>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function openTownModal() {
+        document.getElementById('townModal').classList.add('open');
+    }
+    function closeTownModal() {
+        document.getElementById('townModal').classList.remove('open');
+        document.getElementById('townSearchInput').value = '';
+        document.getElementById('townDropdown').classList.remove('open');
+    }
+
+    let searchTimeout = null;
+    function onTownSearch(value) {
+        clearTimeout(searchTimeout);
+        const dropdown = document.getElementById('townDropdown');
+        if (value.length < 3) {
+            dropdown.classList.remove('open');
+            dropdown.innerHTML = '';
+            return;
+        }
+        searchTimeout = setTimeout(function() {
+            fetch('/api/towns/search?query=' + encodeURIComponent(value))
+                .then(function(r) { return r.json(); })
+                .then(function(results) {
+                    if (results.length === 0) {
+                        dropdown.innerHTML = '<div class="autocomplete-item" style="color:#999;">Aucun r\u00e9sultat</div>';
+                    } else {
+                        dropdown.innerHTML = results.map(function(t) {
+                            return '<div class="autocomplete-item" onclick="addTown(\'' + t.code + '\', \'' + t.name.replace(/'/g, "\\'") + '\')">' + t.name + '</div>';
+                        }).join('');
+                    }
+                    dropdown.classList.add('open');
+                });
+        }, 300);
+    }
+
+    function addTown(code, name) {
+        fetch('/api/towns', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({code: code, name: name})
+        }).then(function(r) {
+            if (r.status === 409) {
+                alert('Cette ville existe d\u00e9j\u00e0.');
+                return;
+            }
+            return r.json();
+        }).then(function(town) {
+            if (!town) return;
+            // Sélectionner la nouvelle ville et recharger le dashboard
+            var url = new URL(window.location);
+            url.searchParams.set('town', town.id);
+            url.searchParams.delete('page');
+            window.location = url;
+        });
+    }
+
+    function selectTown(id) {
+        const url = new URL(window.location);
+        url.searchParams.set('town', id);
+        url.searchParams.delete('page');
+        window.location = url;
+    }
+
+    function toggleTown(id, active) {
+        fetch('/api/towns/' + id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({active: active})
+        }).then(function() {
+            var li = document.querySelector('.town-item[data-id="' + id + '"]');
+            if (!li) return;
+            var badge = li.querySelector('.town-badge');
+            var btn = li.querySelector('.town-action:not(.delete)');
+            if (active) {
+                badge.className = 'town-badge active';
+                badge.textContent = 'actif';
+                btn.textContent = 'D\u00e9sactiver';
+                btn.setAttribute('onclick', 'toggleTown(' + id + ', false)');
+            } else {
+                badge.className = 'town-badge inactive';
+                badge.textContent = 'inactif';
+                btn.textContent = 'Activer';
+                btn.setAttribute('onclick', 'toggleTown(' + id + ', true)');
+            }
+        });
+    }
+
+    function deleteTown(id, name) {
+        if (!confirm('Supprimer la ville "' + name + '" et toutes ses donn\u00e9es ?')) return;
+        fetch('/api/towns/' + id, {
+            method: 'DELETE'
+        }).then(function() {
+            var li = document.querySelector('.town-item[data-id="' + id + '"]');
+            if (li) li.remove();
+        });
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeTownModal();
+    });
+    </script>
+</body>
+</html>
