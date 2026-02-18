@@ -52,13 +52,22 @@ cp .env.example .env
 | `MYSQL_PASSWORD` | MariaDB user password | `changeme` |
 | `MYSQL_ROOT_PASSWORD` | MariaDB root password | `changeme` |
 | `CRAWL_HOUR` / `CRAWL_MINUTE` | Daily crawl time (Europe/Paris) | `8:00` |
-| `CRAWL_PRODUCT_CATEGORY` | TotalEnergies product category ID | `2` |
-| `CRAWL_QUANTITY` | Pellet quantity tier | `3` |
+| `CRAWL_PRODUCT_CATEGORY` | Product category (see table below) | `2` |
+| `CRAWL_QUANTITY` | Quantity (unit depends on category, see table below) | `3` |
 | `SMTP_HOST` / `SMTP_PORT` | SMTP server | `smtp.mailgun.org:587` |
 | `SMTP_USER` / `SMTP_PASSWORD` | SMTP credentials | _(empty — alerts disabled)_ |
 | `MAIL_FROM` / `MAIL_TO` | Sender and recipient addresses | — |
 | `PRICE_DROP_THRESHOLD_PERCENT` | Alert threshold vs. 30-day avg | `5` |
 | `FLASK_PORT` | Exposed dashboard port | `5000` |
+
+**Product categories and quantity units:**
+
+| ID | Category | Quantity unit |
+|----|----------|---------------|
+| 1 | Bagged pellets | Pallet of 66 bags |
+| 2 | Bulk pellets | Tonne |
+| 3 | Premium 40 cm logs | Pallet of 1.85 steres |
+| 4 | Compressed wood logs | Pallet of 4 steres |
 
 3. Launch:
 

@@ -47,7 +47,7 @@ def analyze_and_notify(session: Session, crawl: Crawl) -> None:
 
     if min_price_row is not None:
         min_price = Decimal(str(min_price_row))
-        if crawl.unit_price <= min_price:
+        if crawl.unit_price < min_price:
             alerts.append(
                 {
                     "type": "lowest_price",
