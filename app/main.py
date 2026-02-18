@@ -153,4 +153,14 @@ def _retry_failed_crawl(session_factory) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "seed":
+        from app.seed import generate_seed_data
+
+        engine = get_engine()
+        wait_for_db(engine)
+        Base.metadata.create_all(engine)
+        generate_seed_data()
+    else:
+        main()

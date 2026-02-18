@@ -8,6 +8,10 @@
   Daily crawler that fetches bulk wood pellet prices from the TotalEnergies API, stores price history in MariaDB, serves a web dashboard, and sends email alerts on price drops or active promotions.
 </p>
 
+## Screenshot
+
+![Pellet Price Tracker Dashboard](docs/screenshot.png)
+
 ## Features
 
 - **Multi-town management** — Add, enable/disable, and delete towns via a modal with autocomplete search powered by the TotalEnergies API. An initial crawl runs automatically when a new town is added.
@@ -77,6 +81,16 @@ docker compose up -d
 
 The dashboard is available at `http://localhost:5000` (or whichever port you set via `FLASK_PORT`).
 
+## Seed Data
+
+To populate the database with 365 days of realistic price history (useful for development/demo):
+
+```bash
+docker compose exec app python -m app.main seed
+```
+
+This generates daily crawls for Bordeaux with seasonal price variations, occasional discounts, flash sales, and error days. Existing data is preserved (idempotent).
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -101,6 +115,7 @@ The dashboard is available at `http://localhost:5000` (or whichever port you set
 │   ├── models.py           # SQLAlchemy models (Town, Crawl, Notification)
 │   ├── crawler.py          # TotalEnergies API crawl logic + retry
 │   ├── alerts.py           # Price alert detection + email sending
+│   ├── seed.py             # Demo data generator (365 days)
 │   ├── routes.py           # Flask routes (dashboard, API, healthcheck)
 │   ├── static/
 │   │   └── logo.png
