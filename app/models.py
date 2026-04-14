@@ -84,11 +84,21 @@ class Notification(Base):
     crawl = relationship("Crawl", back_populates="notifications")
 
 
+_engine = None
+_session_factory = None
+
+
 def get_engine():
-    return create_engine(Config.database_url(), pool_pre_ping=True)
+    global _engine
+    if _engine is None:
+        _engine = create_engine(Config.database_url(), pool_pre_ping=True)
+    return _engine
 
 
 def get_session_factory(engine=None):
-    if engine is None:
-        engine = get_engine()
-    return sessionmaker(bind=engine)
+    global _session_factory
+    if _session_factory is None:
+        if engine is None:
+            engine = get_engine()
+        _session_factory = sessionmaker(bind=engine)
+    return _session_factory
