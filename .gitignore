@@ -2,3 +2,13 @@
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+.claude
+.gstack
+.boilerplate-version
+AGENTS.md
+.agents
+.codex
+CLAUDE.local.md
+.worktreeinclude
+raiden-cli

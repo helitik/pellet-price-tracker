@@ -84,6 +84,18 @@ def main() -> None:
         misfire_grace_time=900,
     )
 
+    # Resend alert emails whose sending failed (today's crawls only)
+    from app.alerts import retry_unsent_notifications
+
+    scheduler.add_job(
+        retry_unsent_notifications,
+        CronTrigger(minute="*/15"),
+        args=[session_factory],
+        id="retry_notifications",
+        name="Retry unsent alert emails",
+        misfire_grace_time=900,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler started: daily crawl at %02d:%02d Europe/Paris.",
