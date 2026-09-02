@@ -8,6 +8,10 @@
   Daily crawler that fetches bulk wood pellet prices from the TotalEnergies API, stores price history in MariaDB, serves a web dashboard, and sends email alerts on price drops or active promotions.
 </p>
 
+<p align="center">
+  <a href="https://github.com/helitik/pellet-price-tracker/actions/workflows/ci.yml"><img src="https://github.com/helitik/pellet-price-tracker/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
 ## Screenshot
 
 ![Pellet Price Tracker Dashboard](docs/screenshot.png)
@@ -23,6 +27,8 @@
   - Price hits a 6-month low
   - Price drops significantly vs. the 30-day average
   - An active discount is detected
+
+  Alerts are event-based: an email is sent when a condition appears or the price drops further, not every day the condition still holds. If sending fails, the email is retried every 15 minutes for the rest of the day.
 - **Healthcheck** — `GET /health` endpoint for container monitoring (Portainer, etc.)
 
 ## Tech Stack
@@ -90,6 +96,17 @@ docker compose exec app python -m app.main seed
 ```
 
 This generates daily crawls for Bordeaux with seasonal price variations, occasional discounts, flash sales, and error days. Existing data is preserved (idempotent).
+
+## Tests
+
+Unit tests run on an in-memory SQLite database, no Docker or MariaDB needed:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+They cover alert detection, the event-based notification rules (one email per change, not per day), the retry of unsent emails, and the email content.
 
 ## API Endpoints
 

@@ -1,8 +1,14 @@
-"""Price alert detection and email notification sending."""
+"""Price alert detection and email notification sending.
+
+Alerts are *event*-based: an email is only sent when a condition appears
+(or gets better, i.e. the price drops further), not every day the condition
+holds. To decide, the same detection is run on the previous successful crawl
+of the town and the two results are compared.
+"""
 
 import logging
 import smtplib
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -15,23 +21,18 @@ from app.models import Crawl, Notification
 
 logger = logging.getLogger(__name__)
 
+SMTP_TIMEOUT = 30
+# Do not retry a notification created less than this many minutes ago:
+# it may still be in the middle of its first sending attempt.
+RETRY_MIN_AGE_MINUTES = 5
 
-def analyze_and_notify(session: Session, crawl: Crawl) -> None:
-    """Analyze prices from a successful crawl and send alerts if needed."""
-    if crawl.status != "success" or crawl.unit_price is None:
-        return
 
-    # Avoid duplicates if analyze_and_notify is called twice for the same crawl
-    existing = session.query(Notification).filter_by(crawl_id=crawl.id).first()
-    if existing:
-        logger.info("Notifications already created for crawl #%s, skipping.", crawl.id)
-        return
-
-    alerts: list[dict] = []
+def _reference_prices(
+    session: Session, crawl: Crawl
+) -> tuple[Decimal | None, Decimal | None]:
+    """Return (6-month min, 30-day avg) of successful crawls strictly before this one."""
     today = crawl.crawl_date
-    town_name = crawl.town.name
 
-    # 1. Lowest price (6-month window)
     six_months_ago = today - timedelta(days=180)
     min_price_row = (
         session.query(func.min(Crawl.unit_price))
@@ -45,24 +46,6 @@ def analyze_and_notify(session: Session, crawl: Crawl) -> None:
         .scalar()
     )
 
-    if min_price_row is not None:
-        min_price = Decimal(str(min_price_row))
-        if crawl.unit_price < min_price:
-            alerts.append(
-                {
-                    "type": "lowest_price",
-                    "current_price": crawl.unit_price,
-                    "reference_price": min_price,
-                }
-            )
-            logger.info(
-                "[%s] Alert lowest_price: %s <= %s (6-month min)",
-                town_name,
-                crawl.unit_price,
-                min_price,
-            )
-
-    # 2. Drop vs. 30-day average
     thirty_days_ago = today - timedelta(days=30)
     avg_price_row = (
         session.query(func.avg(Crawl.unit_price))
@@ -76,8 +59,37 @@ def analyze_and_notify(session: Session, crawl: Crawl) -> None:
         .scalar()
     )
 
-    if avg_price_row is not None:
-        avg_price = Decimal(str(avg_price_row)).quantize(Decimal("0.01"))
+    min_price = Decimal(str(min_price_row)) if min_price_row is not None else None
+    avg_price = (
+        Decimal(str(avg_price_row)).quantize(Decimal("0.01"))
+        if avg_price_row is not None
+        else None
+    )
+    return min_price, avg_price
+
+
+def detect_alerts(
+    session: Session, crawl: Crawl
+) -> tuple[list[dict], Decimal | None, Decimal | None]:
+    """Evaluate the alert conditions for a crawl.
+
+    Pure detection, no side effects. Returns (alerts, min_6m, avg_30d).
+    """
+    alerts: list[dict] = []
+    min_price, avg_price = _reference_prices(session, crawl)
+
+    # 1. Lowest price (6-month window)
+    if min_price is not None and crawl.unit_price < min_price:
+        alerts.append(
+            {
+                "type": "lowest_price",
+                "current_price": crawl.unit_price,
+                "reference_price": min_price,
+            }
+        )
+
+    # 2. Drop vs. 30-day average
+    if avg_price is not None:
         threshold = Decimal(str(Config.PRICE_DROP_THRESHOLD_PERCENT))
         drop_limit = avg_price * (1 - threshold / 100)
         if crawl.unit_price < drop_limit:
@@ -87,13 +99,6 @@ def analyze_and_notify(session: Session, crawl: Crawl) -> None:
                     "current_price": crawl.unit_price,
                     "reference_price": avg_price,
                 }
-            )
-            logger.info(
-                "[%s] Alert price_drop: %s < %s (30-day avg - %s%%)",
-                town_name,
-                crawl.unit_price,
-                drop_limit,
-                threshold,
             )
 
     # 3. Active discount
@@ -108,16 +113,86 @@ def analyze_and_notify(session: Session, crawl: Crawl) -> None:
                 "reference_price": crawl.unit_price,
             }
         )
-        logger.info(
-            "[%s] Alert discount_active: discount %s -> %s",
-            town_name,
-            crawl.unit_price,
-            crawl.unit_price_with_discount,
+
+    return alerts, min_price, avg_price
+
+
+def filter_new_alerts(current: list[dict], previous: list[dict]) -> list[dict]:
+    """Keep only alerts that are new compared to the previous crawl.
+
+    An alert is new if its type was not raised for the previous crawl, or if
+    the price is strictly lower than it was then (a further drop is worth a
+    new email; an unchanged situation is not).
+    """
+    previous_by_type = {a["type"]: a for a in previous}
+    new_alerts = []
+    for alert in current:
+        prev = previous_by_type.get(alert["type"])
+        if prev is None or alert["current_price"] < prev["current_price"]:
+            new_alerts.append(alert)
+    return new_alerts
+
+
+def _previous_successful_crawl(session: Session, crawl: Crawl) -> Crawl | None:
+    return (
+        session.query(Crawl)
+        .filter(
+            Crawl.town_id == crawl.town_id,
+            Crawl.status == "success",
+            Crawl.unit_price.isnot(None),
+            Crawl.crawl_date < crawl.crawl_date,
         )
+        .order_by(Crawl.crawl_date.desc())
+        .first()
+    )
+
+
+def analyze_and_notify(session: Session, crawl: Crawl) -> None:
+    """Analyze prices from a successful crawl and send alerts if needed."""
+    if crawl.status != "success" or crawl.unit_price is None:
+        return
+
+    # Avoid duplicates if analyze_and_notify is called twice for the same crawl
+    existing = session.query(Notification).filter_by(crawl_id=crawl.id).first()
+    if existing:
+        logger.info("Notifications already created for crawl #%s, skipping.", crawl.id)
+        return
+
+    town_name = crawl.town.name
+    alerts, min_price, avg_price = detect_alerts(session, crawl)
 
     if not alerts:
         logger.info("[%s] No alert detected for crawl #%s.", town_name, crawl.id)
         return
+
+    # Only notify what changed since the previous crawl
+    previous = _previous_successful_crawl(session, crawl)
+    if previous is not None:
+        previous_alerts, _, _ = detect_alerts(session, previous)
+        new_alerts = filter_new_alerts(alerts, previous_alerts)
+        for alert in alerts:
+            if alert not in new_alerts:
+                logger.info(
+                    "[%s] Alert %s still active (%s EUR/t) but already notified "
+                    "on %s, no new email.",
+                    town_name,
+                    alert["type"],
+                    alert["current_price"],
+                    previous.crawl_date,
+                )
+        alerts = new_alerts
+
+    if not alerts:
+        return
+
+    for alert in alerts:
+        logger.info(
+            "[%s] Alert %s: %s EUR/t (reference %s EUR/t)",
+            town_name,
+            alert["type"],
+            alert["current_price"],
+            alert["reference_price"],
+        )
 
     # Save notifications
     notifications = []
@@ -134,11 +209,70 @@ def analyze_and_notify(session: Session, crawl: Crawl) -> None:
     session.commit()
 
     # Send the email
-    sent = send_alert_email(crawl, alerts, avg_price_row, min_price_row, town_name)
+    sent = send_alert_email(crawl, alerts, avg_price, min_price, town_name)
 
     for notif in notifications:
         notif.sent = sent
     session.commit()
+
+
+def retry_unsent_notifications(session_factory) -> None:
+    """Resend today's alert emails whose sending failed.
+
+    Only notifications from today's crawls are retried, so an old failure
+    never turns into a stale alert days later.
+    """
+    if not Config.SMTP_USER or not Config.SMTP_PASSWORD:
+        return
+
+    session: Session = session_factory()
+    try:
+        today = date.today()
+        min_age = datetime.now() - timedelta(minutes=RETRY_MIN_AGE_MINUTES)
+        unsent = (
+            session.query(Notification)
+            .join(Crawl)
+            .filter(
+                Notification.sent.is_(False),
+                Notification.created_at < min_age,
+                Crawl.crawl_date == today,
+            )
+            .order_by(Notification.crawl_id, Notification.id)
+            .all()
+        )
+        if not unsent:
+            return
+
+        by_crawl: dict[int, list[Notification]] = {}
+        for notif in unsent:
+            by_crawl.setdefault(notif.crawl_id, []).append(notif)
+
+        for crawl_id, notifs in by_crawl.items():
+            crawl = notifs[0].crawl
+            town_name = crawl.town.name
+            logger.info(
+                "[%s] Retrying alert email for crawl #%s (%d notification(s)).",
+                town_name,
+                crawl_id,
+                len(notifs),
+            )
+            alerts = [
+                {
+                    "type": n.alert_type,
+                    "current_price": n.current_price,
+                    "reference_price": n.reference_price,
+                }
+                for n in notifs
+            ]
+            min_price, avg_price = _reference_prices(session, crawl)
+            if send_alert_email(crawl, alerts, avg_price, min_price, town_name):
+                for n in notifs:
+                    n.sent = True
+                session.commit()
+    except Exception as e:
+        logger.error("Notification retry error: %s", e)
+    finally:
+        session.close()
 
 
 def send_alert_email(
@@ -218,7 +352,7 @@ def send_alert_email(
     msg.attach(MIMEText(body, "html"))
 
     try:
-        with smtplib.SMTP(Config.SMTP_HOST, Config.SMTP_PORT) as server:
+        with smtplib.SMTP(Config.SMTP_HOST, Config.SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
             server.starttls()
             server.login(Config.SMTP_USER, Config.SMTP_PASSWORD)
             server.sendmail(Config.MAIL_FROM, [Config.MAIL_TO], msg.as_string())
